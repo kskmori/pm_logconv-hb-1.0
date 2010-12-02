@@ -2832,11 +2832,15 @@ class LogConvertFuncs:
 			return CONV_ITEM_EMPTY
 
 		if nodename in cstat.shutNodeSet:
-			pm_log.debug("The [%s] exists in the shutdown list." % (nodename))
-			pm_log.debug("Ignore the fotrigger flag setting.")
-			return CONV_SHUT_NODE
+			None
+		elif HOSTNAME in cstat.shutNodeSet:
+			nodename = HOSTNAME
+		else:
+			return CONV_OK
 
-		return CONV_OK
+		pm_log.debug("The [%s] exists in the shutdown list." % (nodename))
+		pm_log.debug("Ignore the fotrigger flag setting.")
+		return CONV_SHUT_NODE
 
 	'''
 		Detect resource start action added.
