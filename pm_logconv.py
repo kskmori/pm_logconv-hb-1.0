@@ -1982,8 +1982,12 @@ class LogConvertFuncs:
 	def parse_opid(self, opid):
 		# please detect parse error in caller.
 		tmp = opid.split('_')
-		rscid = '_'.join(tmp[:-2])
-		op = tmp[-2]
+		if tmp[-2] in ['to','from'] and tmp[-3] == 'migrate':
+			rscid = '_'.join(tmp[:-3])
+			op = '_'.join(tmp[-3:-1])
+		else:
+			rscid = '_'.join(tmp[:-2])
+			op = tmp[-2]
 		interval = tmp[-1]
 		return rscid, op, interval
 
@@ -2359,6 +2363,10 @@ class LogConvertFuncs:
 			Jan 12 18:34:51 x3650a crmd: [15901]: info: do_lrm_rsc_op: Performing key=32:13:0:9d68ec4b-527f-4dda-88b3-9203fef16f56 op=prmStateful:1_promote_0 )
 		MsgNo.5-1)
 			Jan 12 18:34:49 x3650a crmd: [3464]: info: do_lrm_rsc_op: Performing key=35:11:0:9d68ec4b-527f-4dda-88b3-9203fef16f56 op=prmStateful:0_demote_0 )
+		MsgNo.11-1)
+			Mar 24 11:17:59 x3650e crmd: [3181]: info: do_lrm_rsc_op: Performing key=9:68:0:13f2515c-f788-4cc4-b5a4-33308d617adc op=prmGuest-a1_migrate_to_0 )
+		MsgNo.12-1)
+			Mar 24 11:18:14 x3650f crmd: [3356]: info: do_lrm_rsc_op: Performing key=10:68:0:13f2515c-f788-4cc4-b5a4-33308d617adc op=prmGuest-a1_migrate_from_0 )
 		MsgNo.17-1)
 			Jan  7 10:21:41 x3650a crmd: [25493]: info: do_lrm_rsc_op: Performing key=35:1:0:683d57a3-6623-46ae-bbc9-6b7930aec9c2 op=prmStonith2-3_start_0 )
 		MsgNo.18-1)
@@ -2395,6 +2403,10 @@ class LogConvertFuncs:
 			Jan 12 18:34:51 x3650a crmd: [15901]: info: process_lrm_event: LRM operation prmStateful:1_promote_0 (call=18, rc=0, cib-update=27, confirmed=true) ok
 		MsgNo.5-2)
 			Jan 12 18:34:49 x3650a crmd: [3464]: info: process_lrm_event: LRM operation prmStateful:0_demote_0 (call=37, rc=0, cib-update=79, confirmed=true) ok
+		MsgNo.11-2)
+			Mar 24 11:18:14 x3650e crmd: [3181]: info: process_lrm_event: LRM operation prmGuest-a1_migrate_to_0 (call=33, rc=0, cib-update=60, confirmed=true) ok
+		MsgNo.12-2)
+			Mar 24 11:18:15 x3650f crmd: [3356]: info: process_lrm_event: LRM operation prmGuest-a1_migrate_from_0 (call=35, rc=0, cib-update=248, confirmed=true) ok
 		MsgNo.17-2)
 			Jan  7 10:21:41 x3650a crmd: [25493]: info: process_lrm_event: LRM operation prmStonith2-3_start_0 (call=11, rc=0, cib-update=42, confirmed=true) ok
 		MsgNo.18-2)
@@ -2405,7 +2417,9 @@ class LogConvertFuncs:
 			'start'  : 'started',
 			'stop'   : 'stopped',
 			'promote': 'promoted',
-			'demote' : 'demoted'
+			'demote' : 'demoted',
+			'migrate_to' : 'migrated_to',
+			'migrate_from' : 'migrated_from'
 		}
 		try:
 			wordlist = logelm.halogmsg.split()
@@ -2440,6 +2454,10 @@ class LogConvertFuncs:
 			Jan  6 15:22:45 x3650a crmd: [26989]: info: process_lrm_event: LRM operation prmStateful:1_promote_0 (call=25, rc=1, cib-update=58, confirmed=true) unknown error
 		MsgNo.5-3)
 			Jan  6 15:22:45 x3650a crmd: [26989]: info: process_lrm_event: LRM operation prmStateful:1_demote_0 (call=25, rc=1, cib-update=58, confirmed=true) unknown error
+		MsgNo.11-3)
+			Mar 24 11:43:41 x3650e crmd: [3181]: info: process_lrm_event: LRM operation prmGuest-a1_migrate_to_0 (call=37, rc=1, cib-update=254, confirmed=true) unknown error
+		MsgNo.12-3)
+			Mar 24 12:11:03 x3650f crmd: [3356]: info: process_lrm_event: LRM operation prmGuest-a1_migrate_from_0 (call=45, rc=1, cib-update=292, confirmed=true) unknown error
 		MsgNo.17-3)
 			Jan  7 10:54:45 x3650a crmd: [32714]: info: process_lrm_event: LRM operation prmStonith2-3_start_0 (call=11, rc=1, cib-update=56, confirmed=true) unknown error
 		MsgNo.19-1)
@@ -2482,6 +2500,10 @@ class LogConvertFuncs:
 			Jan  6 17:41:35 x3650a crmd: [1404]: ERROR: process_lrm_event: LRM operation prmStateful:1_promote_0 (25) Timed Out (timeout=30000ms)
 		MsgNo.5-4)
 			Jan  6 17:41:35 x3650a crmd: [1404]: ERROR: process_lrm_event: LRM operation prmStateful:1_demote_0 (25) Timed Out (timeout=30000ms)
+		MsgNo.11-4)
+			Mar 24 11:59:21 x3650e crmd: [3181]: ERROR: process_lrm_event: LRM operation prmGuest-a1_migrate_to_0 (42) Timed Out (timeout=120000ms)
+		MsgNo.12-4)
+			Mar 24 12:16:15 x3650f crmd: [3356]: ERROR: process_lrm_event: LRM operation prmGuest-a1_migrate_from_0 (48) Timed Out (timeout=120000ms)
 	'''
 	def operation_timedout_ocf(self, outputobj, logelm, lconvfrm):
 		try:
