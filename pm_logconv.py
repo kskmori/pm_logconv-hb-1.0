@@ -2042,7 +2042,10 @@ class LogConvertFuncs:
 		try:
 			valuepos = output.index('value=')
 			currentval = output[valuepos + len('value='):].strip()
-			result = getattr(operator, op)(currentval, attrval)
+			if currentval.isdigit() and attrval.isdigit():
+				result = getattr(operator, op)(int(currentval),int(attrval))
+			else:
+				result = getattr(operator, op)(currentval,attrval)
 		except:
 			pm_log.error("check_attribute(): " +
 				"failed to comparison %s's value. " % (attrname) +
