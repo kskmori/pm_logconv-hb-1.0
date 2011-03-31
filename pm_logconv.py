@@ -33,7 +33,7 @@ from errno import ESRCH
 #
 # version number of pm_logconv.
 #
-VERSION = "1.0"
+VERSION = "1.1"
 
 #
 # system's host name.
@@ -85,6 +85,7 @@ FAIL_STPD	= "4"
 # when cluster status changes to S_POLICY_ENGINE.
 #
 attrRuleList = list()
+attrRules = list()
 
 # A list of resource-id.
 # If the all of specified resources are active,
@@ -636,6 +637,7 @@ class ParseConfigFile:
 		global HOSTCACHE
 		global RESET_INTERVAL
 		global attrRuleList
+		global attrRules
 		global actRscList
 
 		# Get all options in the section.
@@ -682,7 +684,7 @@ class ParseConfigFile:
 					pm_log.warn("parse_basic_settings(): " +
 						"the value of \"%s\" is invalid. " % (optname) +
 						"set an default value(60).")
-			elif optname.startswith(self.OPT_MANAGE_ATTR):
+			elif optname.startswith(self.OPT_MANAGE_ATTR) and optval.count(','):
 				attrRule = optval.split(',')
 				if len(attrRule) != 3:
 					pm_log.warn("parse_basic_settings(): " +
@@ -724,6 +726,46 @@ class ParseConfigFile:
 
 				attrRule = [attrname, op, attrval]
 				attrRuleList.append(attrRule)
+				pm_log.debug("parse_basic_settings(): attrRuleList%s"%(attrRuleList))
+			elif optname.startswith(self.OPT_MANAGE_ATTR) and not optval.count(','):
+				optvals = []; rule = []
+				for x in [x for x in optval.split(' ') if x]:
+					if x.lower() in ['defined','not_defined']:
+						optvals.append(None)
+					optvals.append(x)
+				if len(optvals) % 4 != 3:
+					pm_log.warn("parse_basic_settings(): "
+						"the format of \"%s\" is invalid."
+						%(optname) + " Ignore the setting.")
+					continue # To the next option in [Settings].
+
+				binops = ['lt','gt','le','ge','eq','ne','defined','not_defined']
+				for i,x in enumerate(optvals):
+					if i % 4 == 0:
+						name = x
+					elif i % 4 == 1:
+						y = x.lower().replace('lte','le').replace('gte','ge')
+						if y in binops:
+							op = y
+						else:
+							pm_log.warn("parse_basic_settings(): "
+								"binary_op \"%s\" (in \"%s\") is invalid."
+								%(x,optname) + " Ignore the setting.")
+							break
+					elif i % 4 == 2:
+						rule.append([name, op, x])
+					elif i % 4 == 3:
+						if x.lower() in ['and','or']:
+							rule.append(x.lower())
+						else:
+							pm_log.warn("parse_basic_settings(): "
+								"bool_op \"%s\" (in \"%s\") is invalid."
+								%(x,optname) + " Ignore the setting.")
+							break
+				else:
+					attrRules.append(rule)
+					pm_log.debug("parse_basic_settings(): attrRules%s"%(attrRules))
+				continue # To the next option in [Settings].
 			elif optname == self.OPT_LOGFACILITY:
 				if LogconvLog.facility_map.has_key(optval.lower()):
 					self.logfacility = LogconvLog.facility_map[optval.lower()]
@@ -2055,6 +2097,115 @@ class LogConvertFuncs:
 		return result, currentval
 
 	'''
+		Compare attribute value with it that acquired from CIB.
+		Operations to compare is [lt|gt|le|ge|eq|ne].
+		arg1   : list of target attributes ([[name, op, value], bool_op, [...] ...])
+		arg2   : node name which has the attribute.
+		return : result of comparision:
+		           True  -> matched.
+		           False -> not matched.
+		           None  -> error occurs or attribute doesn't exist.
+	'''
+	def check_attributes(self, rules, node):
+		def operate(rules, i, op):
+			if rules[i-1] == None:
+				pass
+			elif rules[i+1] == None:
+				rules[i+1] = rules[i-1]
+			else:
+				rules[i+1] = getattr(operator,op)(rules[i-1],rules[i+1])
+			rules[i-1] = rules[i] = ''
+
+		pm_log.debug("check_attributes(): node[%s] rules%s"%(node,rules))
+		attrs = {} # current attribute values
+		for i,rule in [(i,x) for (i,x) in enumerate(rules) if i % 2 == 0]:
+			if not rule[0] or rule[0] in attrs:
+				continue
+			# Execute command.
+			opts = ("-G -U %s -t status -n %s"%(node, rule[0]))
+			(status, output) = self.exec_outside_cmd(CMD_CRM_ATTR, opts, False)
+			if status == None:
+				# Failed to exec command, or
+				# The node is dead, or
+				# Specified attribute doesn't exist.
+				pm_log.warn("check_attributes(): "
+					"failed to get %s's value."%(rule[0]))
+				return None
+			pm_log.debug("check_attributes(): "
+				"%s's status[%s] output[%s] node[%s] attr[%s]"
+				%(CMD_CRM_ATTR, status, output, node, rule[0]))
+
+			if status != 0:
+				# crm_attribute returns error value.
+				# Maybe local node is shutting down.
+				return None
+			# In normal case, crm_attribute command shows like the following.
+			# "name=default_ping_set value=100"
+			# So parse it to get current attribute value.
+			attrs[rule[0]] = output[output.index('value=')+len('value='):].strip()
+		pm_log.debug("check_attributes(): attrs%s"%(attrs))
+
+		# phase1: Operate each condition of the attribute.
+		#
+		#     [[None, 'not_defined', 'attribute'], 'and', ['attribute', 'lt', '100']]
+		#      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^         ~~~~~~~~~~~~~~~~~~~~~~~~~~
+		#  -> [None,                               'and', True]
+		#      ^^^^                                       ~~~~
+		#     * 'defined' and 'not_defined' are made None unconditionally.
+		#
+		for i,rule in [(i,x) for (i,x) in enumerate(rules) if i % 2 == 0]:
+			if not rule[0]: # unary_op
+				rules[i] = None
+				continue
+			v = attrs[rule[0]] # current value
+			try:
+				if v.isdigit() and rule[2].isdigit():
+					rules[i] = getattr(operator,rule[1])(int(v),int(rule[2]))
+				else:
+					rules[i] = getattr(operator,rule[1])(v,rule[2])
+				pm_log.debug("check_attributes(): phase1(%d): (%s %s %s)=%s"
+					%(i,v,rule[1],rule[2],rules[i]))
+			except:
+				pm_log.error("check_attributes(): "
+					"failed to comparison %s's value. "%(rule[0]) +
+					"(currentval=%s, op=%s, specifiedval=%s)"
+					%(v,rule[1],rule[2]))
+				return None
+		pm_log.debug("check_attributes(): phase1: rules%s"%(rules))
+
+		# phase2: Operate each 'and' condition.
+		#
+		#     [True, 'or', True, 'and', False, 'and', True]
+		#                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+		#  -> [True, 'or', False]
+		#                  ^^^^^
+		#     * [None, 'and', True] is True, [None 'and', False] is False,
+		#     * and [None, 'and', None] is None.
+		#
+		for i in [i for (i,x) in enumerate(rules) if i % 2 == 1 and x == 'and']:
+			operate(rules, i, 'and_')
+			pm_log.debug("check_attributes(): phase2(%d): rules%s"%(i,rules))
+		l = rules[:]; rules = []
+		for x in [x for x in l if x != '']:
+			rules.append(x)
+		pm_log.debug("check_attributes(): phase2: rules%s"%(rules))
+
+		# phase3: Operate each 'or' condition.
+		#
+		#     [True, 'or', False]
+		#      ^^^^^^^^^^^^^^^^^
+		#  -> [True]
+		#      ^^^^
+		#     * [None, 'or', True] is True, [None 'or', False] is False,
+		#     * and [None, 'or', None] is None.
+		#
+		for i in [i for (i,x) in enumerate(rules) if i % 2 == 1 and x == 'or']:
+			operate(rules, i, 'or_')
+			pm_log.debug("check_attributes(): phase3(%d): rules%s"%(i,rules))
+		pm_log.debug("check_attributes(): phase3: rules[%s]"%(rules[-1]))
+		return rules[-1]
+
+	'''
 		Check the specified node is ping node or not.
 		To get ping node information, parse ha.cf.
 		arg1   : target node name.
@@ -2730,6 +2881,8 @@ class LogConvertFuncs:
 					# Check attribute's value for each node.
 					# Now, the node seems to be active.
 					result = self.check_attribute(attrname, op, attrval, node)[0]
+					pm_log.debug("detect_pe_calc(): "
+						"check_attribute returns [%s]"%(result))
 					if result == True:
 						# attribute's value means "failure(s) occurred"!
 						cstat.FAILURE_OCCURRED = FAIL_SCORE
@@ -2744,6 +2897,15 @@ class LogConvertFuncs:
 						#  some errors occurred in check_attribute() or
 						#  the node is not running or
 						#  specified attribute does not exist.
+				for rules in attrRules:
+					result = self.check_attributes(rules[:], node)
+					pm_log.debug("detect_pe_calc(): "
+						"check_attributes returns [%s]"%(result))
+					if result:
+						cstat.FAILURE_OCCURRED = FAIL_SCORE
+						if (cstat.ACTRSC_MOVE == FAIL_MOVE or
+						    cstat.ACTRSC_MOVE == FAIL_STP):
+							self.detect_fo_start(outputobj)
 		return CONV_OK
 
 	'''
@@ -3000,7 +3162,7 @@ class LogConvertFuncs:
 			rscid = wordlist[3]
 		except:
 			return CONV_PARSE_ERROR
-		
+
 		if self.is_empty(a_nodename, rscid):
 			return CONV_ITEM_EMPTY
 

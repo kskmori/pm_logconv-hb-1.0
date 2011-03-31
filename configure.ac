@@ -1,8 +1,8 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 
-AC_PREREQ([2.65])
-AC_INIT([pm_logconv-hb], [1.0])
+AC_PREREQ([2.59])
+AC_INIT([pm_logconv-hb], [1.1])
 AM_INIT_AUTOMAKE
 AC_PREFIX_DEFAULT(/usr)
 PM_PKG="pacemaker"
@@ -51,6 +51,17 @@ HA_NOARCHDATAHBDIR="$HA_DATADIR/$PM_PKG"
 AC_SUBST(HA_NOARCHDATAHBDIR)
 AC_PROG_LN_S
 
-AC_CONFIG_FILES([Makefile])
+grep "release 6" /etc/redhat-release -q
+if test $? = 0; then
+	rhelver=6
+else
+	rhelver=5
+fi
+RHEL_VER="$rhelver"
+AC_SUBST(RHEL_VER)
+
+AC_CONFIG_FILES(Makefile	\
+	pm_logconv.spec
+)
 AC_OUTPUT
 
