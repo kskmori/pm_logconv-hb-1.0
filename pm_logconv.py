@@ -2275,7 +2275,12 @@ class LogConvertFuncs:
 				# Failed to exec command.
 				pm_log.warn("get_onlinenode(): failed to get online nodelist.")
 				return None
-			standby = output[output.index("value"):]
+			try:
+				standby = output[output.index("value"):]
+			except:
+				pm_log.debug("get_onlinenode(): " +
+					"failed to parse output strings. [%s]" % (output))
+				continue
 			if standby.split("=")[1] == "off":
 				onlineset.add(nodename)
 		pm_log.debug("get_onlinenode(): node %s is online node." % (list(onlineset)))
