@@ -2331,6 +2331,17 @@ class LogConvertFuncs:
 		cstat.shutNodeSet = set()
 		self.debug_status()
 
+	'''
+		Clear ConvertStatus (exclude shutNodeSet, ino and offset).
+	'''
+	def clear_status_except_shutnode(self):
+		pm_log.debug("clear_status_except_shutnode():" +
+			"clear convert status (exclude shutNodeSet, ino and offset).")
+		tmp_shutNodeSet =  cstat.shutNodeSet
+		self.clear_status()
+		cstat.shutNodeSet = tmp_shutNodeSet
+		self.debug_status()
+
 	##########
 	# General-purpose functions.
 	##########
@@ -2833,6 +2844,7 @@ class LogConvertFuncs:
 		if self.is_empty(procname, pgid):
 			return CONV_ITEM_EMPTY
 
+		cstat.shutNodeSet.add(HOSTNAME)
 		convertedlog = ("Stop \"%s\" process normally. (pid=%s)" % (procname, pgid))
 		outputobj.output_log(lconvfrm.loglevel, convertedlog)
 		return CONV_OK
@@ -2895,9 +2907,8 @@ class LogConvertFuncs:
 		self.rscstatList = list()
 
 		# If any failure didn't occur and Heartbeat is not in shutdown process,
-		# and the node on localhost is not in shutting down,
 		# check each attribute's value to decide whether it is F/O or not.
-		if cstat.FAILURE_OCCURRED == False and HOSTNAME not in cstat.shutNodeSet:
+		if cstat.FAILURE_OCCURRED == False:
 			nodeset = self.get_onlinenode()
 			if nodeset == None:
 				return CONV_GETINFO_ERROR
@@ -2941,7 +2952,7 @@ class LogConvertFuncs:
 		It considers that F/O succeeded when all of specified resources
 		(with the parameter OPT_ACTRSC in config file) are running,
 		and if any resource at all stops, it considers F/O failed.
-		This function is called when cluster status became "S_IDLE".
+		This function is called when cluster status became "S_IDLE" or "S_STOPPING".
 
 		MsgNo.F0-2, F12-1, F12-2)
 			Jan  5 14:50:07 x3650a crmd: [13198]: info: do_state_transition: State transition S_TRANSITION_ENGINE -> S_IDLE [ input=I_TE_SUCCESS cause=C_FSA_INTERNAL origin=notify_crmd ]
@@ -2958,9 +2969,9 @@ class LogConvertFuncs:
 					break
 
 		if cstat.IN_FO_PROCESS == False:
-			self.clear_status()
+			self.clear_status_except_shutnode()
 			return CONV_OK
-		self.clear_status()
+		self.clear_status_except_shutnode()
 
 		# When one or more Unmanaged resource exists in the cluster,
 		# (even if the resource is not set in act_rsc)
@@ -3024,15 +3035,11 @@ class LogConvertFuncs:
 			return CONV_ITEM_EMPTY
 
 		if nodename in cstat.shutNodeSet:
-			None
-		elif HOSTNAME in cstat.shutNodeSet:
-			nodename = HOSTNAME
-		else:
-			return CONV_OK
+			pm_log.debug("The [%s] exists in the shutdown list." % (nodename))
+			pm_log.debug("Ignore the fotrigger flag setting.")
+			return CONV_SHUT_NODE
 
-		pm_log.debug("The [%s] exists in the shutdown list." % (nodename))
-		pm_log.debug("Ignore the fotrigger flag setting.")
-		return CONV_SHUT_NODE
+		return CONV_OK
 
 	'''
 		Detect resource start action added.
@@ -3277,7 +3284,7 @@ class LogConvertFuncs:
 	'''
 	def detect_hb_shutdown(self, outputobj, logelm, lconvfrm):
 		outputobj.output_log(lconvfrm.loglevel, lconvfrm.rulename)
-		cstat.shutNodeSet.discard(HOSTNAME)
+		cstat.shutNodeSet.clear()
 		return CONV_OK
 
 	'''
