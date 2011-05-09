@@ -3319,37 +3319,6 @@ class LogConvertFuncs:
 		cstat.shutNodeSet.add(nodename)
 		return CONV_OK
 
-	'''
-		Detect the send shutdown request to DC.
-		Add localhost name to shutting down node list.
-		Output nothing.
-
-		MsgNo.14-5)
-			Sep 16 13:11:51 x3650a crmd: [11369]: info: do_shutdown_req: Sending shutdown request to DC: x3650a
-	'''
-	def detect_send_shutdown(self, outputobj, logelm, lconvfrm):
-		cstat.shutNodeSet.add(HOSTNAME)
-		return CONV_OK
-
-	'''
-		Detect the shutting down node.
-		Add node name to shutting down node list.
-		Output nothing.
-
-		MsgNo.14-6)
-			Mar 29 14:14:17 x3650a pengine: [26424]: info: determine_online_status: Node x3650a is shutting down
-	'''
-	def detect_node_shutting_down(self, outputobj, logelm, lconvfrm):
-		try:
-			nodename = logelm.halogmsg.split()[-4]
-		except:
-			return CONV_PARSE_ERROR
-		if self.is_empty(nodename):
-			return CONV_ITEM_EMPTY
-
-		cstat.shutNodeSet.add(nodename)
-		return CONV_OK
-
 	##########
 	# For logging daemon event.
 	##########
