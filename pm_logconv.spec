@@ -3,8 +3,8 @@
 ########################################
 %define name pm_logconv
 %define cluster hb
-%define version 1.1
-%define release 1.el@RHEL_VER@
+%define version 1.2
+%define release 1
 %define prefix /usr
 %define instdir pm_logconv
 %define ORGARCH %{name}-%{version}
@@ -13,7 +13,7 @@
 Summary: Pacemaker and Heartbeat log converter
 Name: %{name}-%{cluster}
 Version: %{version}
-Release: %{release}
+Release: %{release}%{?dist}
 Group: Applications
 Source: %{name}-%{version}.tar.gz
 License: GPL
@@ -22,7 +22,7 @@ BuildRoot: %{_tmppath}/%{name}-%{version}
 BuildRequires: make
 BuildArch: noarch
 Requires: python >= 2.4, python < 3.0
-Requires: pacemaker >= 1.0.9
+Requires: pacemaker >= 1.0.9, pacemaker < 1.1
 Requires: heartbeat >= 3.0.3
 
 ########################################

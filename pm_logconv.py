@@ -33,7 +33,7 @@ from errno import ESRCH
 #
 # version number of pm_logconv.
 #
-VERSION = "1.1"
+VERSION = "1.2"
 
 #
 # system's host name.
@@ -109,11 +109,6 @@ do_shutdown = False
 # command name for getting current status of the cluster.
 #
 CMD_CRM_ATTR = "crm_attribute"
-
-#
-# command name for getting current node status of the cluster.
-#
-CMD_CRM_NODE = "crm_node"
 
 #
 # command name for getting DC node status.
@@ -403,7 +398,7 @@ class PIDFile:
 				if pid.isdigit() and int(pid) != os.getpid():
 					return self.is_running(int(pid), cmdline)
 				else:
-					pm_log.warn("PIDFile.read: PID file is screwed up.")
+					pm_log.info("PIDFile.read: PID file is screwed up.")
 					return self.FILE_INVALID
 			else:
 				pm_log.info("PIDFile.read: PID file doesn't exist.")
@@ -474,7 +469,8 @@ class ConvertStatus:
 		self.ACTRSC_MOVE = False
 		self.IN_FO_PROCESS = False
 		self.timedoutRscopSet = set()
-		self.shutNodeSet = set()
+		self.attrDict = dict()
+		self.nodeDict = dict()
 
 cstat = ConvertStatus()
 
@@ -501,15 +497,16 @@ class StatusFile:
 				cstat.ACTRSC_MOVE = c.ACTRSC_MOVE
 				cstat.IN_FO_PROCESS = c.IN_FO_PROCESS
 				cstat.timedoutRscopSet = c.timedoutRscopSet
-				cstat.shutNodeSet = c.shutNodeSet
+				cstat.attrDict = c.attrDict
+				cstat.nodeDict = c.nodeDict
 			else:
 				pm_log.info("StatusFile.read: status file doesn't exist.")
 				self.clear_cstat()
 			pm_log.debug("StatusFile.read: [%d:%d], FAIL[%s], IN_CALC[%s], "\
-				"RSC_MOVE[%s], IN_FO[%s], Rscop%s, Node%s" %
+				"RSC_MOVE[%s], IN_FO[%s], Rscop%s, attrDict%s, nodeDict%s" %
 				(cstat.ino, cstat.offset, cstat.FAILURE_OCCURRED,
 				cstat.IN_CALC, cstat.ACTRSC_MOVE, cstat.IN_FO_PROCESS,
-				list(cstat.timedoutRscopSet), list(cstat.shutNodeSet)))
+				list(cstat.timedoutRscopSet), dict(cstat.attrDict), dict(cstat.nodeDict)))
 			return True
 		except Exception, strerror:
 			pm_log.error("StatusFile.read: I/O error occurred.")
@@ -538,10 +535,10 @@ class StatusFile:
 			os.ftruncate(f, l)
 			os.close(f)
 			pm_log.debug("StatusFile.write: [%d:%d], FAIL[%s], IN_CALC[%s], "\
-				"RSC_MOVE[%s], IN_FO[%s], Rscop%s, Node%s" %
+				"RSC_MOVE[%s], IN_FO[%s], Rscop%s, attrDict%s, nodeDict%s" %
 				(cstat.ino, cstat.offset, cstat.FAILURE_OCCURRED,
 				cstat.IN_CALC, cstat.ACTRSC_MOVE, cstat.IN_FO_PROCESS,
-				list(cstat.timedoutRscopSet), list(cstat.shutNodeSet)))
+				list(cstat.timedoutRscopSet), dict(cstat.attrDict), dict(cstat.nodeDict)))
 			return True
 		except Exception, strerror:
 			pm_log.error("StatusFile.write: I/O error occurred.")
@@ -993,9 +990,9 @@ class LogConvert:
 		psr.add_option("-s", action="store_true", dest="ask_status",
 			default=False, help="return pm_logconv status")
 		psr.add_option("-c", action="store_true", dest="is_continue",
-            default=False, help="start with a continuous mode (\"-p\" option is mutually exclusive)")
+			default=False, help="start with a continuous mode (\"-p\" option is mutually exclusive)")
 		psr.add_option("-p", action="store_true", dest="is_present",
-			default=False, help="start with a present mode  (\"-c\" option is mutually exclusive)")
+			default=False, help="start with a present mode    (\"-c\" option is mutually exclusive)")
 		psr.add_option("-f", dest="config_file", default=CONFIGFILE,
 			help="the specified configuration file is used")
 		psr.add_option("-v", "--version", action="callback", callback=print_version,
@@ -1280,8 +1277,8 @@ class LogConvert:
 	'''
 		Check DC node is idle or not with crmadmin command.
 		When DC is idle, crmadmin returns "S_IDLE" status.
-		return: True  -> DC is idle.
-		        False -> DC is not idle.
+		return: True  -> local is idle.
+		        False -> local is not idle or not DC.
 		        None  -> error occurs.
 		                 cannot execute command or maybe during DC election.
 	'''
@@ -1290,36 +1287,13 @@ class LogConvert:
 		# crmadmin command's default value is 30sec.
 		TIMEOUT = 30 * 1000
 
-		# Heartbeat status check
-		if self.funcs.is_heartbeat() != True:
-			return False
-
-		# Get DC node name.
-		options = ("-D -t %s" % (TIMEOUT))
-		(status, output) = \
-			self.funcs.exec_outside_cmd(CMD_CRMADMIN, options, False)
-		if status == None:
-			# Failed to exec command.
-			pm_log.warn("is_idle(): failed to get DC node name.")
-			return None
-		if status != 0:
-			# Maybe during DC election.
-			return False
-		try:
-			dcnode = output.split()[-1]
-		except:
-			# Failed to parse output strings.
-			pm_log.warn("is_idle(): failed to parse output strings." +
-				"(DC node name)")
-			return None
-
 		# Get DC status.
-		options = ("-S %s -t %s" % (dcnode, TIMEOUT))
+		options = ("-S %s -t %s" % (HOSTNAME, TIMEOUT))
 		(status, output) = \
 			self.funcs.exec_outside_cmd(CMD_CRMADMIN, options, False)
 		if status == None:
 			# Failed to exec command.
-			pm_log.warn("is_idle(): failed to get DC node status.")
+			pm_log.warn("is_idle(): failed to get local node status.")
 			return None
 		if status != 0:
 			# Maybe during DC election.
@@ -1329,9 +1303,9 @@ class LogConvert:
 		except:
 			# Failed to parse output strings.
 			pm_log.warn("is_idle(): failed to parse output strings." +
-				"DC node status")
+				"local node status")
 			return None
-		if dcstat == "S_IDLE":
+		if dcstat == "S_IDLE" or dcstat == "S_NOT_DC":
 			return True
 		return False
 
@@ -1451,16 +1425,20 @@ class LogConvert:
 						# FailOver pattern
 						#	resource failer  + resource move
 						#	score failer     + resource move
+						#	node failer      + resource move
 						#	node failer      + resource start
 						#	resource failer  + resource stop
 						#	score failer     + resource stop
+						#	node failer      + resource stop
 						#	node failer      + resource stopped
 						if \
 							(cstat.FAILURE_OCCURRED == FAIL_RSC   and cstat.ACTRSC_MOVE == FAIL_MOVE) or \
 							(cstat.FAILURE_OCCURRED == FAIL_SCORE and cstat.ACTRSC_MOVE == FAIL_MOVE) or \
+							(cstat.FAILURE_OCCURRED == FAIL_NODE  and cstat.ACTRSC_MOVE == FAIL_MOVE) or \
 							(cstat.FAILURE_OCCURRED == FAIL_NODE  and cstat.ACTRSC_MOVE == FAIL_STR)  or \
 							(cstat.FAILURE_OCCURRED == FAIL_RSC   and cstat.ACTRSC_MOVE == FAIL_STP)  or \
 							(cstat.FAILURE_OCCURRED == FAIL_SCORE and cstat.ACTRSC_MOVE == FAIL_STP)  or \
+							(cstat.FAILURE_OCCURRED == FAIL_NODE  and cstat.ACTRSC_MOVE == FAIL_STP)  or \
 							(cstat.FAILURE_OCCURRED == FAIL_NODE  and cstat.ACTRSC_MOVE == FAIL_STPD):
 							self.funcs.detect_fo_start(outputobj)
 					if lconvfrm.ignoremsg:
@@ -1823,18 +1801,17 @@ class OutputConvertedLog:
 class RscStat:
 		'''
 			rscid    : resource id.
-			status   : [Started on node|Stopped]
-			fofailed : True  -> F/O failed. ("cannot run anywhere" appeared.)
-			           False -> "cannot run anywhere" didn't appear.
+			status   : [Started on node|Stopped|Move node -> node]
 			unmanaged: True  -> resource is unmanaged.
 			           False -> resource is managed.
+			operated : True  -> resource is operated.
+			           False -> resource isn't operated.
 		'''
-		def __init__(self, rscid=None, status=None, fofailed=False,
-			unmanaged=False):
+		def __init__(self, rscid=None, status=None, unmanaged=False, operated=False):
 			self.rscid = rscid
 			self.status = status
-			self.fofailed = fofailed
 			self.unmanaged = unmanaged
+			self.operated = operated
 
 		'''	operator eq	'''
 		def __eq__(self,other):
@@ -1844,20 +1821,16 @@ class RscStat:
 		def replace(self,new):
 			if new.status:
 				self.status = new.status
-			if new.fofailed:
-				self.fofailed = new.fofailed
 			if new.unmanaged:
 				self.unmanaged = new.unmanaged
+			if new.operated:
+				self.operated = new.operated
 
 		'''
 			Only for debug.
 		'''
 		def print_rscstat(self):
-			print "rsc:%s\tstatus:%s\tfofailed:%s\tunmanaged:%s\t" % (self.rscid,self.status,self.fofailed,self.unmanaged)
-#			print self.rscid
-#			print self.status
-#			print self.fofailed
-#			print self.unmanaged
+			print "rsc:%s\tstatus:%s\tunmanaged:%s\toperated:%s" % (self.rscid,self.status,self.unmanaged,self.operated)
 
 '''
 	Return codes for functions to convert log.
@@ -2061,33 +2034,43 @@ class LogConvertFuncs:
 		           None  -> error occurs or attribute doesn't exist.
 	'''
 	def check_attribute(self, attrname, op, attrval, node):
-
-		# Execute command.
-		options = ("-G -U %s -t status -n %s" % (node, attrname))
-		(status, output) = \
-			self.exec_outside_cmd(CMD_CRM_ATTR, options, False)
-		if status == None:
-			# Failed to exec command, or
-			# The node is dead, or
-			# Specified attribute doesn't exist.
-			pm_log.warn("check_attribute(): " +
-				"failed to get %s's value." % (attrname))
+		if not (node, attrname) in cstat.attrDict:
 			return None, None
+		# Get attribute value from log.
+		currentval = cstat.attrDict[node, attrname]
 
-		pm_log.debug("check_attribute(): " +
-			"%s's status[%s] output[%s] node[%s] attr[%s]" %
-			(CMD_CRM_ATTR, status, output, node, attrname))
+		if currentval == None:
+			# Get attribute value from command.
+			# Execute command.
+			options = ("-G -U %s -t status -n %s" % (node, attrname))
+			(status, output) = self.exec_outside_cmd(CMD_CRM_ATTR, options, False)
+			if status == None:
+				# Failed to exec command, or
+				# The node is dead, or
+				# Specified attribute doesn't exist.
+				pm_log.warn("check_attribute(): " +
+					"failed to get %s's value." % (attrname))
+				return None, None
 
-		if status != 0:
-			# crm_attribute returns error value.
-			# Maybe local node is shutting down.
-			return None, None
-		# In normal case, crm_attribute command shows like the following.
-		# " name=default_ping_set value=100"
-		# So parse it to get current attribute value.
-		try:
+			pm_log.debug("check_attribute(): " +
+				"%s's status[%s] output[%s] node[%s] attr[%s]" %
+				(CMD_CRM_ATTR, status, output, node, attrname))
+
+			if status != 0:
+				# crm_attribute returns error value.
+				# Maybe local node is shutting down.
+				return None, None
+			# In normal case, crm_attribute command shows like the following.
+			# " name=default_ping_set value=100"
+			# So parse it to get current attribute value.
 			valuepos = output.index('value=')
 			currentval = output[valuepos + len('value='):].strip()
+		else:
+			pm_log.debug("check_attribute(): " +
+				"log's node[%s] attr[%s] value[%s]" %
+				(node, attrname, currentval))
+
+		try:
 			if currentval.isdigit() and attrval.isdigit():
 				result = getattr(operator, op)(int(currentval),int(attrval))
 			else:
@@ -2101,7 +2084,7 @@ class LogConvertFuncs:
 		return result, currentval
 
 	'''
-		Compare attribute value with it that acquired from CIB.
+		Compare attribute value with it that acquired from CIB or log message.
 		Operations to compare is [lt|gt|le|ge|eq|ne].
 		arg1   : list of target attributes ([[name, op, value], bool_op, [...] ...])
 		arg2   : node name which has the attribute.
@@ -2125,28 +2108,41 @@ class LogConvertFuncs:
 		for i,rule in [(i,x) for (i,x) in enumerate(rules) if i % 2 == 0]:
 			if not rule[0] or rule[0] in attrs:
 				continue
-			# Execute command.
-			opts = ("-G -U %s -t status -n %s"%(node, rule[0]))
-			(status, output) = self.exec_outside_cmd(CMD_CRM_ATTR, opts, False)
-			if status == None:
-				# Failed to exec command, or
-				# The node is dead, or
-				# Specified attribute doesn't exist.
-				pm_log.warn("check_attributes(): "
-					"failed to get %s's value."%(rule[0]))
-				return None
-			pm_log.debug("check_attributes(): "
-				"%s's status[%s] output[%s] node[%s] attr[%s]"
-				%(CMD_CRM_ATTR, status, output, node, rule[0]))
+			if (node, rule[0]) in cstat.attrDict:
+				# Get attribute value from log.
+				attrs[rule[0]] = cstat.attrDict[node, rule[0]]
 
-			if status != 0:
-				# crm_attribute returns error value.
-				# Maybe local node is shutting down.
-				return None
-			# In normal case, crm_attribute command shows like the following.
-			# "name=default_ping_set value=100"
-			# So parse it to get current attribute value.
-			attrs[rule[0]] = output[output.index('value=')+len('value='):].strip()
+				if attrs[rule[0]] == None:
+					# Get attribute value from command.
+					# Execute command.
+					opts = ("-G -U %s -t status -n %s"%(node, rule[0]))
+					(status, output) = self.exec_outside_cmd(CMD_CRM_ATTR, opts, False)
+					if status == None:
+						# Failed to exec command, or
+						# The node is dead, or
+						# Specified attribute doesn't exist.
+						pm_log.warn("check_attributes(): "
+							"failed to get %s's value."%(rule[0]))
+						return None
+					pm_log.debug("check_attributes(): "
+						"%s's status[%s] output[%s] node[%s] attr[%s]"
+						%(CMD_CRM_ATTR, status, output, node, rule[0]))
+
+					if status != 0:
+						# crm_attribute returns error value.
+						# Maybe local node is shutting down.
+						return None
+					# In normal case, crm_attribute command shows like the following.
+					# "name=default_ping_set value=100"
+					# So parse it to get current attribute value.
+					attrs[rule[0]] = output[output.index('value=')+len('value='):].strip()
+				else:
+					pm_log.debug("check_attribute(): " +
+					"log's node[%s] attr[%s] value[%s]" %
+					(node, rule[0], attrs[rule[0]]))
+
+		if len(attrs) < 1:
+			return None
 		pm_log.debug("check_attributes(): attrs%s"%(attrs))
 
 		# phase1: Operate each condition of the attribute.
@@ -2250,41 +2246,41 @@ class LogConvertFuncs:
 		return False
 
 	'''
-		Get online node from command.
-		return : active node in the cluster.
-		         None -> error occurs.
+		Check unmatched attribute exists or not.
+		Compared with the attribute's rule of configure file.
+		return : True  -> unmatched attribute exists.
+		         False -> unmatched attribute not exists.
 	'''
-	def get_onlinenode(self):
-		onlineset = set()
-		ret = self.is_heartbeat()
-		if ret == None:
-			return ret
-		elif ret == False:
-			return onlineset
-		options = ("-p")
-		(status, nodelist) = self.exec_outside_cmd(CMD_CRM_NODE, options, False)
-		if status == None:
-			# Failed to exec command.
-			pm_log.warn("get_onlinenode(): failed to get active nodelist.")
-			return None
-
-		for nodename in nodelist.split():
-			options = ("-N %s -n standby -G -l forever -d off" % (nodename))
-			(status, output) = self.exec_outside_cmd(CMD_CRM_ATTR, options, False)
-			if status == None:
-				# Failed to exec command.
-				pm_log.warn("get_onlinenode(): failed to get online nodelist.")
-				return None
-			try:
-				standby = output[output.index("value"):]
-			except:
-				pm_log.debug("get_onlinenode(): " +
-					"failed to parse output strings. [%s]" % (output))
+	def check_unmatch_attr_rule(self):
+		for node, stat in cstat.nodeDict.iteritems():
+			if stat != "online":
 				continue
-			if standby.split("=")[1] == "off":
-				onlineset.add(nodename)
-		pm_log.debug("get_onlinenode(): node %s is online node." % (list(onlineset)))
-		return onlineset
+			# Check each attribute's value.
+			for attrRule in attrRuleList:
+				attrname, op, attrval = tuple(attrRule)
+				# Check attribute's value for each node.
+				# Now, the node seems to be active.
+				result = self.check_attribute(attrname, op, attrval, node)[0]
+				pm_log.debug("check_unmatch_attr_rule(): "
+					"check_attribute returns [%s]"%(result))
+				if result:
+					# attribute's value means "failure(s) occurred"!
+					return True
+					# [COMMENT]
+					# result == False:
+					#   attribute did not change or
+					#   it was updated to normal value.
+					# result == None:
+					#  some errors occurred in check_attribute() or
+					#  the node is not running or
+					#  specified attribute does not exist.
+			for rules in attrRules:
+				result = self.check_attributes(rules[:], node)
+				pm_log.debug("check_unmatch_attr_rule(): "
+					"check_attributes returns [%s]"%(result))
+				if result:
+					return True
+		return False
 
 	'''
 		Set specified values to RscStat object list.
@@ -2293,13 +2289,13 @@ class LogConvertFuncs:
 		When the arg's value is None, don't update the element's value.
 
 		arg1 : resource id.
-		arg2 : the rsc's status. [Started on node|Stopped]
-		arg3 : the rsc's F/O failed or not. (depends on "cannot run anywhere")
-		arg4 : the rsc is managed or not.
+		arg2 : the rsc's status. [Started on node|Stopped|Move node -> node]
+		arg3 : the rsc is managed or not.
+		arg4 : the rsc is operated or not.
 		return Nothing.
 	'''
-	def set_rscstat(self, rscid, statstr, fofailed, unmanaged):
-		newrsc = RscStat(rscid,statstr,fofailed,unmanaged)
+	def set_rscstat(self, rscid, statstr, unmanaged, operated):
+		newrsc = RscStat(rscid, statstr, unmanaged, operated)
 		if newrsc in self.rscstatList:
 			idx = self.rscstatList.index(newrsc)
 			self.rscstatList[idx].replace(newrsc)
@@ -2311,10 +2307,10 @@ class LogConvertFuncs:
 	'''
 	def debug_status(self):
 		pm_log.debug("debug_status(): FAIL[%s], IN_CALC[%s], "\
-			"RSC_MOVE[%s], IN_FO[%s], Rscop%s, Node%s" %
+			"RSC_MOVE[%s], IN_FO[%s], Rscop%s, attrDict%s, nodeDict%s" %
 			(cstat.FAILURE_OCCURRED, cstat.IN_CALC,
 			cstat.ACTRSC_MOVE, cstat.IN_FO_PROCESS,
-			list(cstat.timedoutRscopSet), list(cstat.shutNodeSet)))
+			list(cstat.timedoutRscopSet), dict(cstat.attrDict), dict(cstat.nodeDict)))
 
 	'''
 		Clear ConvertStatus (exclude ino and offset).
@@ -2328,18 +2324,23 @@ class LogConvertFuncs:
 		cstat.ACTRSC_MOVE = False
 		cstat.IN_FO_PROCESS = False
 		cstat.timedoutRscopSet = set()
-		cstat.shutNodeSet = set()
+		cstat.attrDict = dict()
+		cstat.nodeDict = dict()
 		self.debug_status()
 
 	'''
-		Clear ConvertStatus (exclude shutNodeSet, ino and offset).
+		Clear ConvertStatus (exclude nodeDict, ino and offset).
 	'''
-	def clear_status_except_shutnode(self):
-		pm_log.debug("clear_status_except_shutnode():" +
-			"clear convert status (exclude shutNodeSet, ino and offset).")
-		tmp_shutNodeSet =  cstat.shutNodeSet
-		self.clear_status()
-		cstat.shutNodeSet = tmp_shutNodeSet
+	def clear_status_except_node(self):
+		pm_log.debug("clear_status_except_node():" +
+			"clear convert status (exclude nodeDict, ino and offset).")
+		self.debug_status()
+		cstat.FAILURE_OCCURRED = False
+		cstat.IN_CALC = False
+		cstat.ACTRSC_MOVE = False
+		cstat.IN_FO_PROCESS = False
+		cstat.timedoutRscopSet = set()
+		cstat.attrDict = dict()
 		self.debug_status()
 
 	##########
@@ -2597,12 +2598,33 @@ class LogConvertFuncs:
 			output_loglevel = self.LOG_WARN_LV
 			status = "lost"
 		elif status == "active":
-			if nodename in cstat.shutNodeSet:
-				cstat.shutNodeSet.discard(nodename)
 			status = "member"
+			cstat.nodeDict[nodename] = status
 
 		convertedlog = ("Node %s is %s." % (nodename, status))
 		outputobj.output_log(output_loglevel, convertedlog)
+		return CONV_OK
+
+	'''
+		Determine Node status.
+		So it outputs nothing.
+
+		MsgNo. 6-3)
+			Jun 14 15:04:03 x3650a pengine: [3748]: info: determine_online_status: Node x3650a is shutting down
+			Jun 14 15:04:56 x3650a pengine: [21571]: info: determine_online_status: Node x3650a is online
+			Jun 14 15:05:42 x3650a pengine: [21571]: info: determine_online_status_fencing: Node x3650b is down
+	'''
+	def node_status_determined(self, outputobj, logelm, lconvfrm):
+		try:
+			nodename = logelm.halogmsg.split()[2]
+			nodestat = " ".join(logelm.halogmsg.split()[4:])
+		except:
+			return CONV_PARSE_ERROR
+
+		if self.is_empty(nodename, nodestat):
+			return CONV_ITEM_EMPTY
+
+		cstat.nodeDict[nodename] = nodestat
 		return CONV_OK
 
 	##########
@@ -2844,7 +2866,6 @@ class LogConvertFuncs:
 		if self.is_empty(procname, pgid):
 			return CONV_ITEM_EMPTY
 
-		cstat.shutNodeSet.add(HOSTNAME)
 		convertedlog = ("Stop \"%s\" process normally. (pid=%s)" % (procname, pgid))
 		outputobj.output_log(lconvfrm.loglevel, convertedlog)
 		return CONV_OK
@@ -2906,44 +2927,6 @@ class LogConvertFuncs:
 		self.rscstatList = None
 		self.rscstatList = list()
 
-		# If any failure didn't occur and Heartbeat is not in shutdown process,
-		# check each attribute's value to decide whether it is F/O or not.
-		if cstat.FAILURE_OCCURRED == False:
-			nodeset = self.get_onlinenode()
-			if nodeset == None:
-				return CONV_GETINFO_ERROR
-			for node in (nodeset - cstat.shutNodeSet):
-				# Check each attribute's value.
-				for attrRule in attrRuleList:
-					attrname, op, attrval = tuple(attrRule)
-					# Check attribute's value for each node.
-					# Now, the node seems to be active.
-					result = self.check_attribute(attrname, op, attrval, node)[0]
-					pm_log.debug("detect_pe_calc(): "
-						"check_attribute returns [%s]"%(result))
-					if result == True:
-						# attribute's value means "failure(s) occurred"!
-						cstat.FAILURE_OCCURRED = FAIL_SCORE
-						if	cstat.ACTRSC_MOVE == FAIL_MOVE or \
-							cstat.ACTRSC_MOVE == FAIL_STP:
-							self.detect_fo_start(outputobj)
-						# [COMMENT]
-						# result == False:
-						#   attribute did not change or
-						#   it was updated to normal value.
-						# result == None:
-						#  some errors occurred in check_attribute() or
-						#  the node is not running or
-						#  specified attribute does not exist.
-				for rules in attrRules:
-					result = self.check_attributes(rules[:], node)
-					pm_log.debug("detect_pe_calc(): "
-						"check_attributes returns [%s]"%(result))
-					if result:
-						cstat.FAILURE_OCCURRED = FAIL_SCORE
-						if (cstat.ACTRSC_MOVE == FAIL_MOVE or
-						    cstat.ACTRSC_MOVE == FAIL_STP):
-							self.detect_fo_start(outputobj)
 		return CONV_OK
 
 	'''
@@ -2969,9 +2952,9 @@ class LogConvertFuncs:
 					break
 
 		if cstat.IN_FO_PROCESS == False:
-			self.clear_status_except_shutnode()
+			self.clear_status_except_node()
 			return CONV_OK
-		self.clear_status_except_shutnode()
+		self.clear_status_except_node()
 
 		# When one or more Unmanaged resource exists in the cluster,
 		# (even if the resource is not set in act_rsc)
@@ -2991,15 +2974,16 @@ class LogConvertFuncs:
 			detect_fo_failed = False
 			for rscstat in self.rscstatList:
 				if rscstat.rscid in actRscList:
-					if rscstat.fofailed or rscstat.status == "Stopped" :
+					if rscstat.status == "Stopped" :
 						output_loglevel = self.LOG_ERR_LV
 						output_status = ("Stopped")
 						detect_fo_failed = True
 					else:
 						output_loglevel = self.LOG_INFO_LV
 						output_status = rscstat.status
-					convertedlog = ("Resource %s : %s" % (rscstat.rscid, output_status))
-					outputobj.output_log(output_loglevel, convertedlog)
+					if not (rscstat.status != "Stopped" and rscstat.operated != True):
+						convertedlog = ("Resource %s : %s" % (rscstat.rscid, output_status))
+						outputobj.output_log(output_loglevel, convertedlog)
 
 		if detect_fo_failed:
 			outputobj.output_log(self.LOG_ERR_LV, "fail-over failed.")
@@ -3034,8 +3018,8 @@ class LogConvertFuncs:
 		if self.is_empty(nodename):
 			return CONV_ITEM_EMPTY
 
-		if nodename in cstat.shutNodeSet:
-			pm_log.debug("The [%s] exists in the shutdown list." % (nodename))
+		if cstat.nodeDict.has_key(nodename) and cstat.nodeDict[nodename] != "online":
+			pm_log.debug("The [%s] is not online." % (nodename))
 			pm_log.debug("Ignore the fotrigger flag setting.")
 			return CONV_SHUT_NODE
 
@@ -3047,7 +3031,7 @@ class LogConvertFuncs:
 		So it outputs nothing.
 
 		MsgNo. F11-1)
-			Jan  5 15:12:25 x3650a pengine: [16657]: notice: LogActions: Start prmExPostgreSQLDB (x3650a)
+			Jan  5 15:12:25 x3650a pengine: [16657]: notice: LogActions: Start   prmExPostgreSQLDB (x3650a)
 	'''
 	def add_rsc_start(self, outputobj, logelm, lconvfrm):
 		try:
@@ -3074,7 +3058,7 @@ class LogConvertFuncs:
 		This is to get resource status when F/O finished.
 
 		MsgNo. F11-2)
-			Jan  5 15:19:23 x3650a pengine: [17658]: notice: LogActions: Stop resource prmExPostgreSQLDB (x3650a)
+			Jan  5 15:19:23 x3650a pengine: [17658]: notice: LogActions: Stop    resource prmExPostgreSQLDB (x3650a)
 	'''
 	def add_rsc_stop(self, outputobj, logelm, lconvfrm):
 		try:
@@ -3091,7 +3075,12 @@ class LogConvertFuncs:
 
 		if rscid in actRscList:
 			cstat.ACTRSC_MOVE = FAIL_STP
-			if cstat.FAILURE_OCCURRED == FAIL_RSC or cstat.FAILURE_OCCURRED == FAIL_SCORE:
+			if cstat.FAILURE_OCCURRED == False and self.check_unmatch_attr_rule() == True:
+				cstat.FAILURE_OCCURRED = FAIL_SCORE
+			if \
+				cstat.FAILURE_OCCURRED == FAIL_RSC   or \
+				cstat.FAILURE_OCCURRED == FAIL_SCORE or \
+				cstat.FAILURE_OCCURRED == FAIL_NODE:
 				self.detect_fo_start(outputobj)
 		return CONV_OK
 
@@ -3101,11 +3090,11 @@ class LogConvertFuncs:
 		So it outputs nothing.
 
 		MsgNo.F11-3)
-			Jan  5 15:36:42 x3650a pengine: [27135]: notice: LogActions: Leave resource prmFsPostgreSQLDB1 (Started x3650a)
+			Jan  5 15:36:42 x3650a pengine: [27135]: notice: LogActions: Leave   resource prmFsPostgreSQLDB1 (Started x3650a)
 		MsgNo.F11-8)
 			Jan  5 14:50:05 x3650a pengine: [13197]: notice: LogActions: Restart resource prmIpPostgreSQLDB (Started x3650b)
 		MsgNo.F11-9)
-			Jan  5 14:50:41 x3650a pengine: [13197]: notice: LogActions: Leave resource prmPingd:0 (Stopped)
+			Jan  5 14:50:41 x3650a pengine: [13197]: notice: LogActions: Leave   resource prmPingd:0 (Stopped)
 	'''
 	def add_no_action(self, outputobj, logelm, lconvfrm):
 		try:
@@ -3135,27 +3124,6 @@ class LogConvertFuncs:
 		return CONV_OK
 
 	'''
-		Detect resouce cannot run anywhere.
-		This is to get resource status when F/O finished.
-		So it outputs nothing.
-
-		MsgNo. F11-4)
-			Jan  5 15:19:20 x3650a pengine: [17658]: WARN: native_color: Resource prmApPostgreSQLDB cannot run anywhere
-	'''
-	def detect_cannot_run_anywhere(self, outputobj, logelm, lconvfrm):
-		try:
-			wordlist = logelm.halogmsg.split()
-			rscid = wordlist[2]
-		except:
-			return CONV_PARSE_ERROR
-		if self.is_empty(rscid):
-			return CONV_ITEM_EMPTY
-
-		# Set the resource's status to the list.
-		self.set_rscstat(rscid, None, True, None)
-		return CONV_OK
-
-	'''
 		Detect resouce became unmanaged.
 		This is to get resource status when F/O finished.
 		So it outputs nothing.
@@ -3178,7 +3146,7 @@ class LogConvertFuncs:
 			return CONV_ITEM_EMPTY
 
 		# Set the resource's status to the list.
-		self.set_rscstat(rscid, None, None, True)
+		self.set_rscstat(rscid, None, True, None)
 		return CONV_OK
 
 	'''
@@ -3186,7 +3154,7 @@ class LogConvertFuncs:
 		This is to get resource status when F/O started.
 
 		MsgNo. F11-6)
-			Jan  5 15:12:27 x3650a pengine: [16657]: notice: LogActions: Move resource prmExPostgreSQLDB (Started x3650a -> x3650b)
+			Jan  5 15:12:27 x3650a pengine: [16657]: notice: LogActions: Move    resource prmExPostgreSQLDB (Started x3650a -> x3650b)
 	'''
 	def add_rsc_move(self, outputobj, logelm, lconvfrm):
 		try:
@@ -3206,8 +3174,40 @@ class LogConvertFuncs:
 
 		if rscid in actRscList:
 			cstat.ACTRSC_MOVE = FAIL_MOVE
-			if cstat.FAILURE_OCCURRED == FAIL_RSC or cstat.FAILURE_OCCURRED == FAIL_SCORE:
+			if cstat.FAILURE_OCCURRED == False and self.check_unmatch_attr_rule() == True:
+				cstat.FAILURE_OCCURRED = FAIL_SCORE
+			if \
+				cstat.FAILURE_OCCURRED == FAIL_RSC   or \
+				cstat.FAILURE_OCCURRED == FAIL_SCORE or \
+				cstat.FAILURE_OCCURRED == FAIL_NODE:
 				self.detect_fo_start(outputobj)
+		return CONV_OK
+
+	'''
+		Resource initiating action.
+		This is to get resource status when F/O finished.
+		So it outputs nothing.
+
+		MsgNo. F11-10)
+			May 27 11:23:50 x3650a crmd: [8108]: info: te_rsc_command: Initiating action 25: start prmExPostgreSQLDB_start_0 on x3650a (local)
+			May 27 11:23:50 x3650a crmd: [8108]: info: te_rsc_command: Initiating action 25: start prmExPostgreSQLDB_start_0 on x3650b
+	'''
+	def rsc_init_action(self, outputobj, logelm, lconvfrm):
+		if cstat.IN_FO_PROCESS == False:
+			return CONV_OK
+
+		try:
+			rscid, op = self.parse_opid(logelm.halogmsg.split()[5])[:2]
+			if op == "monitor":
+				return CONV_OK
+		except:
+			return CONV_PARSE_ERROR
+
+		if self.is_empty(rscid):
+			return CONV_ITEM_EMPTY
+
+		if rscid in actRscList:
+			self.set_rscstat(rscid, None, None, True)
 
 		return CONV_OK
 
@@ -3268,7 +3268,6 @@ class LogConvertFuncs:
 		if self.is_empty(nodename):
 			return CONV_ITEM_EMPTY
 
-		cstat.shutNodeSet.add(nodename)
 		convertedlog = ("Pacemaker on %s is shutting down." % (nodename))
 		outputobj.output_log(lconvfrm.loglevel, convertedlog)
 		return CONV_OK
@@ -3284,7 +3283,7 @@ class LogConvertFuncs:
 	'''
 	def detect_hb_shutdown(self, outputobj, logelm, lconvfrm):
 		outputobj.output_log(lconvfrm.loglevel, lconvfrm.rulename)
-		cstat.shutNodeSet.clear()
+		cstat.nodeDict.clear()
 		return CONV_OK
 
 	'''
@@ -3297,7 +3296,6 @@ class LogConvertFuncs:
 			Jan 18 10:36:18 x3650a crmd: [12294]: info: crm_shutdown: Requesting shutdown
 	'''
 	def detect_pcmk_shutting_down(self, outputobj, logelm, lconvfrm):
-		cstat.shutNodeSet.add(HOSTNAME)
 		outputobj.output_log(lconvfrm.loglevel, lconvfrm.rulename)
 		return CONV_OK
 
@@ -3316,7 +3314,7 @@ class LogConvertFuncs:
 		if self.is_empty(nodename):
 			return CONV_ITEM_EMPTY
 
-		cstat.shutNodeSet.add(nodename)
+		cstat.nodeDict[nodename] = "shutting down"
 		return CONV_OK
 
 	##########
@@ -3491,11 +3489,44 @@ class LogConvertFuncs:
 		outputobj.output_log(lconvfrm.loglevel, convertedlog)
 		return CONV_OK
 
+	'''
+		Detect cib updated or added.
+
+		MsgNo. 22-3)
+			Jul  8 11:30:24 x3650a crmd: [4118]: info: abort_transition_graph: \
+				te_update_diff:150 - Triggered transition abort \
+				(complete=1, tag=nvpair, id=status-f8d52aae-518b-4b06-b1a1-b23486f8b410-default_ping_set, name=NA, value=100, magic=NA, cib=0.10.47) \
+				: Transient attribute: update
+			Jul  8 11:30:24 x3650a crmd: [4118]: info: abort_transition_graph: \
+				te_update_diff:150 - Triggered transition abort \
+				(complete=1, tag=nvpair, id=status-f8d52aae-518b-4b06-b1a1-b23486f8b410-default_ping_set, magic=NA, cib=0.10.47) \
+				: Transient attribute: update
+	'''
+	def detect_cib_updated(self, outputobj, logelm, lconvfrm):
+		try:
+			attrval=None
+			for word in logelm.halogmsg.split(", "):
+				if word.startswith("id="):
+					uuid_attrname = word.split("=")[1].split("-", 1)[1]
+					nodeuuid = uuid_attrname[0:36]
+					nodename = self.get_nodename(nodeuuid)
+					attrname = uuid_attrname.replace(nodeuuid + "-" , "")
+				elif word.startswith("value="):
+					attrval = word.split("=")[1]
+		except:
+			return CONV_PARSE_ERROR
+
+		if self.is_empty(nodename, attrname, attrval):
+			return CONV_ITEM_EMPTY
+
+		cstat.attrDict[nodename, attrname] = attrval
+		return CONV_OK
+
 	##########
 	# For Heartbeat service starts.
 	##########
 	'''
-		Heartbeat log message which means Heartbeat service is starting.
+		Convert log message which means Heartbeat service is starting.
 
 		MsgNo.23-1)
 			Jul 15 15:50:31 x3650a heartbeat: [22780]: info: Configuration validated. Starting heartbeat 3.0.3
