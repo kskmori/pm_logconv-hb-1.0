@@ -3091,6 +3091,8 @@ class LogConvertFuncs:
 
 		MsgNo.F11-3)
 			Jan  5 15:36:42 x3650a pengine: [27135]: notice: LogActions: Leave   resource prmFsPostgreSQLDB1 (Started x3650a)
+		MsgNo.F11-4)
+			Jan  5 11:02:55 x3650a pengine: [17394]: notice: LogActions: Recover resource prmApPostgreSQLDB (Started x3650b)
 		MsgNo.F11-8)
 			Jan  5 14:50:05 x3650a pengine: [13197]: notice: LogActions: Restart resource prmIpPostgreSQLDB (Started x3650b)
 		MsgNo.F11-9)
