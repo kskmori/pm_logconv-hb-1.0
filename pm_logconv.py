@@ -1536,7 +1536,7 @@ class LogConvert:
 					logfile = open(path, 'r')
 					cstat.ino = os.fstat(logfile.fileno()).st_ino
 				else:
-					self.do_ptn_matching(logline)
+					self.do_ptn_matching(logline.replace('#011', ' '))
 					statfile.write()
 		except Exception, strerror:
 			pm_log.error("convert: error occurred.")
