@@ -89,5 +89,3 @@ true
 %config /etc/pm_logconv.conf
 %dir %{prefix}/share/pacemaker/%{instdir}
 %{prefix}/share/pacemaker/%{instdir}/pm_logconv.py
-%ghost %{prefix}/share/pacemaker/%{instdir}/pm_logconv.pyc
-%ghost %{prefix}/share/pacemaker/%{instdir}/pm_logconv.pyo
