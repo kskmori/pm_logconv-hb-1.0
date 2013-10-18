@@ -1329,6 +1329,10 @@ class LogConvert:
 			self.last_reset_t = datetime.datetime.now()
 		pm_log.debug("check_dc_and_reset(): try to reset log convert status.")
 		self.funcs.debug_status()
+		if self.funcs.is_init_status() == True:
+			pm_log.debug("check_dc_and_reset(): log convert status is initial value. " +
+				"Avoid to reset log convert status.")
+			return
 		ret = self.is_idle()
 		if ret == True:
 			self.funcs.clear_status()
@@ -2342,6 +2346,23 @@ class LogConvertFuncs:
 		cstat.timedoutRscopSet = set()
 		cstat.attrDict = dict()
 		self.debug_status()
+
+	'''
+		Check ConvertStatus(exclude ino and offset) is initial value or not.
+		return : True  -> initial value
+		         False -> not initial value
+	'''
+	def is_init_status(self):
+		if \
+			cstat.FAILURE_OCCURRED      == False and \
+			cstat.IN_CALC               == False and \
+			cstat.ACTRSC_MOVE           == False and \
+			cstat.IN_FO_PROCESS         == False and \
+			len(cstat.timedoutRscopSet) == 0     and \
+			len(cstat.attrDict)         == 0     and \
+			len(cstat.nodeDict)         == 0:
+			return True
+		return False
 
 	##########
 	# General-purpose functions.
