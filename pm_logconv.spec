@@ -3,7 +3,7 @@
 ########################################
 %define name pm_logconv
 %define cluster hb
-%define version 1.2
+%define version 1.3
 %define release 1
 %define prefix /usr
 %define instdir pm_logconv

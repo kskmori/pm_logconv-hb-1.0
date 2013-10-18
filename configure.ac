@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.59])
-AC_INIT([pm_logconv-hb], [1.2])
+AC_INIT([pm_logconv-hb], [1.3])
 AM_INIT_AUTOMAKE
 AC_PREFIX_DEFAULT(/usr)
 PM_PKG="pacemaker"
