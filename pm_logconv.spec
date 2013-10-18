@@ -1,6 +1,7 @@
 ########################################
 # Derived definitions
 ########################################
+%define __check_files %{nil}
 %define name pm_logconv
 %define cluster hb
 %define version 1.3
